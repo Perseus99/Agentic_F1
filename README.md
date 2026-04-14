@@ -1,10 +1,5 @@
 # TwinTrack — Digital Twin Economic Simulator
 
-> **WEHack UTD · Capital One Track**
-> Model pricing shifts, franchise expansion, and audience changes against real economic data. Compare control vs. experiment outcomes with full explainability.
-
----
-
 ## What It Does
 
 TwinTrack lets a small business owner register their business as a **digital twin** — a structured snapshot of their financials, costs, and sales profile — and then run **what-if simulations** before making real decisions.
