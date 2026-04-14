@@ -166,10 +166,15 @@ def ui_sim_to_ip2(sim: dict[str, Any], monthly_revenue: float) -> dict[str, Any]
     """Map React `sim` state to IP2."""
     uc = sim.get("useCase") or sim.get("use_case") or "pricing"
 
+    # Shared: forecast horizon (clamp 1–24 months, default 6)
+    _tl  = sim.get("timelineMonths")
+    _h   = int(float(_tl) if _tl not in (None, "") else 6)
+    _h   = min(24, max(1, _h))
+
     if uc == "pricing":
         raw = sim.get("priceChangePct")
         pct = float(raw) / 100.0 if raw not in (None, "") else 0.0
-        return {"use_case": "pricing", "price_change_pct": pct}
+        return {"use_case": "pricing", "price_change_pct": pct, "forecast_horizon": _h}
 
     if uc == "audience":
         mb  = sim.get("marketingBudgetPct")
@@ -183,14 +188,22 @@ def ui_sim_to_ip2(sim: dict[str, Any], monthly_revenue: float) -> dict[str, Any]
             "target_demographic":      target_demo,
             "expected_reach_increase":  0.15,
             "marketing_spend_increase": msp,
+            "forecast_horizon":         _h,
         }
 
-    nloc   = int(float(sim.get("newLocations") or 1))
-    invest = float(sim.get("franchiseFee") or 45000)
-    rev_pl = max(1000.0, monthly_revenue * 0.75)
+    nloc       = int(float(sim.get("newLocations") or 1))
+    invest     = float(sim.get("franchiseFee") or 45000)
+    rev_pl     = max(1000.0, monthly_revenue * 0.75)
+    royalty    = sim.get("royaltyPct")
+    royalty_pct = float(royalty) / 100.0 if royalty not in (None, "") else 0.0
+    royalty_pct = min(0.5, max(0.0, royalty_pct))  # clamp 0–50%
+    horizon    = int(float(sim.get("timelineMonths") or 6))
+    horizon    = min(24, max(1, horizon))           # clamp 1–24 months
     return {
         "use_case":                      "franchising",
         "new_locations":                  max(1, nloc),
         "investment_per_location":        invest,
         "expected_revenue_per_location":  rev_pl,
+        "royalty_pct":                    royalty_pct,
+        "forecast_horizon":               horizon,
     }

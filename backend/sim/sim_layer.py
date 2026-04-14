@@ -133,38 +133,39 @@ def compute_confidence_score(ms: dict, use_case: str) -> float:
 # ── Projection Builder ────────────────────────────────────────────────────────
 
 def _build_projections(ms: dict, base_revenue: float, base_footfall: float,
-                       decision_ratio: float = 1.0) -> dict:
+                       decision_ratio: float = 1.0, horizon: int = 6) -> dict:
     """
-    Use Prophet sector_spending_forecast from MS to project a 6-month trajectory.
+    Use Prophet sector_spending_forecast from MS to project an N-month trajectory.
     The decision_ratio (OP2_revenue / OP1_revenue) scales OP2 projections on top.
+    horizon is passed from IP2.forecast_horizon (default 6, clamped 1–24).
 
     Rule: growth_factor = forecast_value / current_value
           projected = base × growth_factor × decision_ratio
     """
-    ei      = ms.get("economic_indicators", {})
-    fc      = ms.get("forecasts", {})
-    sector_fc    = fc.get("sector_spending_forecast", {}).get("values", [])
+    ei            = ms.get("economic_indicators", {})
+    fc            = ms.get("forecasts", {})
+    sector_fc     = fc.get("sector_spending_forecast", {}).get("values", [])
     current_spend = ei.get("sector_consumer_spending", {}).get("current", 1.0) or 1.0
 
-    revenue_6m:  list[dict] = []
-    footfall_6m: list[dict] = []
+    revenue_nm:  list[dict] = []
+    footfall_nm: list[dict] = []
 
-    for i, entry in enumerate(sector_fc[:6]):
-        val = entry["value"] if isinstance(entry, dict) else current_spend
+    for i, entry in enumerate(sector_fc[:horizon]):
+        val    = entry["value"] if isinstance(entry, dict) else current_spend
         growth = val / current_spend
-        revenue_6m.append({"month": i + 1, "value": round(base_revenue * growth * decision_ratio, 2)})
-        footfall_6m.append({"month": i + 1, "value": round(base_footfall * growth * decision_ratio, 0)})
+        revenue_nm.append({"month": i + 1, "value": round(base_revenue * growth * decision_ratio, 2)})
+        footfall_nm.append({"month": i + 1, "value": round(base_footfall * growth * decision_ratio, 0)})
 
     # Fallback: if MS has no forecast data, project flat
-    if not revenue_6m:
-        for i in range(6):
-            revenue_6m.append({"month": i + 1, "value": round(base_revenue * decision_ratio, 2)})
-            footfall_6m.append({"month": i + 1, "value": round(base_footfall * decision_ratio, 0)})
+    if not revenue_nm:
+        for i in range(horizon):
+            revenue_nm.append({"month": i + 1, "value": round(base_revenue * decision_ratio, 2)})
+            footfall_nm.append({"month": i + 1, "value": round(base_footfall * decision_ratio, 0)})
 
     market_growth = ei.get("sector_growth_rate", {}).get("current", 0.0)
     return {
-        "revenue_6m":    revenue_6m,
-        "footfall_6m":   footfall_6m,
+        "revenue_6m":    revenue_nm,
+        "footfall_6m":   footfall_nm,
         "market_growth": round(market_growth, 4),
     }
 
@@ -334,13 +335,16 @@ def _franchising(ip1: dict, ip2: dict, ms: dict) -> tuple[dict, dict, float, flo
     n_loc           = int(ip2.get("new_locations", 1))
     invest_per_loc  = float(ip2.get("investment_per_location", 50_000))
     rev_per_loc     = float(ip2.get("expected_revenue_per_location", rev_op1 * 0.80))
+    royalty_pct     = float(ip2.get("royalty_pct", 0.0))   # fraction, e.g. 0.06 = 6%
 
     saturation          = float(market_data.get("market_saturation_index", 0.30))
     saturation_discount = saturation * 0.30
 
     new_revenue_raw  = n_loc * rev_per_loc * (1 - saturation_discount)
     new_revenue_adj  = new_revenue_raw * (1 + sentiment * 0.05)
-    rev_op2          = rev_op1 + new_revenue_adj
+    # Royalty income: ongoing % of each new location's revenue paid to the franchisor
+    royalty_income   = new_revenue_adj * royalty_pct
+    rev_op2          = rev_op1 + new_revenue_adj + royalty_income
 
     # New location costs: fixed (rent, utilities for new location) estimated at 60% of
     # original fixed costs, variable at 80% of original variable costs (less efficient initially).
@@ -421,10 +425,12 @@ def run_simulation(ms: dict, ip1: dict, ip2: dict) -> dict:
     flags        = ms.get("news_context", {}).get("flags", [])
 
     # Projection ratio: how much bigger/smaller OP2 revenue trajectory is vs OP1
-    decision_ratio = fin_op2["revenue"] / fin_op1["revenue"] if fin_op1["revenue"] else 1.0
+    decision_ratio   = fin_op2["revenue"] / fin_op1["revenue"] if fin_op1["revenue"] else 1.0
+    forecast_horizon = int(ip2.get("forecast_horizon", 6))
+    forecast_horizon = min(24, max(1, forecast_horizon))
 
-    proj_op1 = _build_projections(ms, fin_op1["revenue"], foot_op1, decision_ratio=1.0)
-    proj_op2 = _build_projections(ms, fin_op2["revenue"], foot_op2, decision_ratio=decision_ratio)
+    proj_op1 = _build_projections(ms, fin_op1["revenue"], foot_op1, decision_ratio=1.0,          horizon=forecast_horizon)
+    proj_op2 = _build_projections(ms, fin_op2["revenue"], foot_op2, decision_ratio=decision_ratio, horizon=forecast_horizon)
 
     delta = {
         "revenue_delta": round(fin_op2["revenue"] - fin_op1["revenue"], 2),

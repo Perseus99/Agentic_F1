@@ -319,10 +319,8 @@ HTTP status codes used: `200`, `400`, `404`, `500`.
 
 ## Known gaps / items to coordinate
 
-1. **`royaltyPct` and `priceScope`** are collected in the UI but are not consumed by the backend simulation engine. They are silently ignored for now. Do not build UI logic that depends on them producing a different result.
+1. **`priceScope`** is collected in the UI ("All SKUs" vs "Single category") but is not consumed by the backend. The simulation engine has no per-category revenue breakdown in IP1, so scoping is not possible without changes to the enrollment form. Treat "all" as the only meaningful option for now — do not build UI logic that implies different outcomes per scope.
 
 2. **`nlDescription` hint text** (`TwinTrack.jsx` step 3 description) still mentions "Claude Haiku". The backend now uses local Ollama (`qwen2.5:7b`). Update the hint text to avoid confusion during demo.
 
-3. **`timelineMonths`** exists in the frontend sim state but is never included in the API payload. The backend always returns a fixed 6-month projection window.
-
-4. **sessionStorage dependency:** The dashboard screen reads `twintrack_twin_layer_json` from `sessionStorage` to show business name/type/location. If the user navigates directly to the simulate screen without going through enrollment first, `bizForDash` will show fallback values. Keep this in mind if redesigning the navigation flow.
+3. **sessionStorage dependency:** The dashboard screen reads `twintrack_twin_layer_json` from `sessionStorage` to show business name/type/location. If the user navigates directly to the simulate screen without going through enrollment first, `bizForDash` will show fallback values. Keep this in mind if redesigning the navigation flow.
