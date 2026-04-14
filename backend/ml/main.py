@@ -16,9 +16,15 @@ from context import extract_context, extract_context_from_dict
 from fetcher import fetch_all
 from forecaster import run_forecasts
 from sentiment import run_sentiment
-from elasticity import compute_elasticity
+from elasticity import compute_elasticity          # formula fallback (used by agent tool)
 from ms_builder import build_ms, write_ms, MS_DIR, OP_DIR
 from utils import load_json, validate_ms_schema
+
+_AGENTS_DIR = os.path.join(os.path.dirname(_ML_DIR), "agents")
+if _AGENTS_DIR not in sys.path:
+    sys.path.insert(0, os.path.dirname(_ML_DIR))
+
+from agents.elasticity_agent import calibrate_elasticity
 
 
 def _op1_exists() -> tuple:
@@ -117,9 +123,9 @@ def run(ip_path: str, exp_id: str = None) -> str:
         print(f"[main] ERROR running sentiment: {e}")
         sentiment = {"sentiment_score": 0.0, "flags": []}
 
-    # --- Step 6: Compute elasticity modifiers ---
+    # --- Step 6: Compute elasticity modifiers (agent-calibrated) ---
     try:
-        elasticity = compute_elasticity(raw_data)
+        elasticity = calibrate_elasticity(raw_data, context)
     except Exception as e:
         print(f"[main] ERROR computing elasticity: {e}")
         elasticity = {
@@ -211,9 +217,9 @@ def build_market_snapshot(twin: dict) -> dict:
         print(f"[main] ERROR running sentiment: {e}")
         sentiment = {"sentiment_score": 0.0, "flags": []}
 
-    # --- Step 5: Compute elasticity modifiers ---
+    # --- Step 5: Compute elasticity modifiers (agent-calibrated) ---
     try:
-        elasticity = compute_elasticity(raw_data)
+        elasticity = calibrate_elasticity(raw_data, context)
     except Exception as e:
         print(f"[main] ERROR computing elasticity: {e}")
         elasticity = {
