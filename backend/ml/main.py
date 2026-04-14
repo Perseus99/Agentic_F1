@@ -12,7 +12,7 @@ if _ML_DIR not in sys.path:
 
 load_dotenv()
 
-from context import extract_context
+from context import extract_context, extract_context_from_dict
 from fetcher import fetch_all
 from forecaster import run_forecasts
 from sentiment import run_sentiment
@@ -160,6 +160,98 @@ def run(ip_path: str, exp_id: str = None) -> str:
     print(f"{'='*50}\n")
 
     return ms_path
+
+
+def build_market_snapshot(twin: dict) -> dict:
+    """
+    Build a Market Snapshot (MS) dict from an in-memory twin_layer.
+    No file I/O on the input side — returns the MS dict directly.
+    Called by orchestrator.run_simulate_pipeline() for the /api/simulate route.
+
+    Args:
+        twin: enrolled business twin_layer dict
+
+    Returns:
+        MS dict (same schema as run() produces, minus the file path)
+    """
+    print(f"\n{'='*50}")
+    print(f"[main] build_market_snapshot — in-memory path")
+    print(f"{'='*50}\n")
+
+    meta        = twin.get("meta") or {}
+    business_id = str(meta.get("business_id") or "unknown")
+    use_case    = None  # base snapshot, not tied to a specific experiment
+
+    # --- Step 1: Extract context from dict (no file read) ---
+    try:
+        context = extract_context_from_dict(twin)
+    except Exception as e:
+        print(f"[main] ERROR extracting context: {e}")
+        raise
+
+    # --- Step 2: Fetch all API data (with cache) ---
+    try:
+        raw_data = fetch_all(context)
+    except Exception as e:
+        print(f"[main] ERROR fetching data: {e}")
+        raise
+
+    # --- Step 3: Run ARIMA forecasts ---
+    try:
+        horizon   = context.get("forecast_horizon_months", 6)
+        forecasts = run_forecasts(raw_data, horizon)
+    except Exception as e:
+        print(f"[main] ERROR running forecasts: {e}")
+        forecasts = {}
+
+    # --- Step 4: Run sentiment analysis ---
+    try:
+        sentiment = run_sentiment(raw_data, context)
+    except Exception as e:
+        print(f"[main] ERROR running sentiment: {e}")
+        sentiment = {"sentiment_score": 0.0, "flags": []}
+
+    # --- Step 5: Compute elasticity modifiers ---
+    try:
+        elasticity = compute_elasticity(raw_data)
+    except Exception as e:
+        print(f"[main] ERROR computing elasticity: {e}")
+        elasticity = {
+            "price_elasticity":  1.0,
+            "labor_elasticity":  1.0,
+            "demand_elasticity": 0.0,
+            "market_elasticity": 0.5,
+        }
+
+    # --- Step 6: Build and validate MS ---
+    try:
+        ms = build_ms(
+            context=context,
+            raw_data=raw_data,
+            forecasts=forecasts,
+            sentiment=sentiment,
+            elasticity=elasticity,
+            ip_type="base",
+        )
+        validate_ms_schema(ms)
+    except ValueError as e:
+        print(f"[main] ERROR: MS schema validation failed: {e}")
+        raise
+    except Exception as e:
+        print(f"[main] ERROR building MS: {e}")
+        raise
+
+    # --- Step 7: Write MS to disk for auditing ---
+    try:
+        write_ms(ms, "base", business_id=business_id, use_case=use_case)
+    except Exception as e:
+        print(f"[main] WARNING: could not write MS file ({e}) — continuing anyway")
+
+    print(f"\n{'='*50}")
+    print(f"[main] build_market_snapshot complete.")
+    print(f"{'='*50}\n")
+
+    return ms
 
 
 if __name__ == "__main__":

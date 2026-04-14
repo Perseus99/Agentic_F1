@@ -163,6 +163,55 @@ def _fallback_msa() -> str:
     return "19100"
 
 
+def extract_context_from_dict(twin: dict) -> dict:
+    """
+    Build business context from an in-memory twin_layer dict.
+    Same output as extract_context() but no file I/O.
+    Used by build_market_snapshot() in ml/main.py.
+    """
+    meta = twin.get("meta") or {}
+    bp   = twin.get("business_profile") or {}
+    loc  = bp.get("location") or {}
+
+    business_name    = str(meta.get("business_name") or "Business")
+    business_type    = str(bp.get("business_type") or "").lower().strip()
+    city             = str(loc.get("city") or "").lower().strip()
+    state            = str(loc.get("state") or "").lower().strip()
+    forecast_horizon = meta.get("forecast_horizon_months") or 6
+
+    naics_code = NAICS_LOOKUP.get(business_type)
+    msa_code   = MSA_LOOKUP.get(city)
+
+    if not naics_code or not msa_code:
+        print(f"[context] Missing codes — calling Data Agent (NAICS missing: {not naics_code}, MSA missing: {not msa_code})...")
+        agent_result = _haiku_map(business_type, city, state)
+
+        if not naics_code:
+            naics_code = agent_result.get("naics_code", "")
+            if not _validate_naics(naics_code):
+                print(f"[context] Invalid NAICS '{naics_code}' returned, using fallback.")
+                naics_code = _fallback_naics()
+
+        if not msa_code:
+            msa_code = agent_result.get("msa_code", "")
+            if not _validate_msa(msa_code):
+                print(f"[context] Invalid MSA '{msa_code}' returned, using fallback.")
+                msa_code = _fallback_msa()
+
+    context = {
+        "business_name":           business_name,
+        "business_type":           business_type,
+        "city":                    city,
+        "state":                   state,
+        "naics_code":              naics_code,
+        "msa_code":                msa_code,
+        "forecast_horizon_months": forecast_horizon,
+    }
+
+    print(f"[context] Resolved → NAICS: {naics_code}, MSA: {msa_code}")
+    return context
+
+
 def extract_context(ip_path: str) -> dict:
     """
     Read IP file and return business context with NAICS + MSA codes.

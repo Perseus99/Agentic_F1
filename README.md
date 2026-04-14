@@ -49,14 +49,16 @@ backend/
 
 **Request flow for a simulation:**
 ```
-Frontend → Run simulation engine (UI)
-  → load twin layer from disk
-  → NL enrichment agent (if description provided)
-  → ml_run()         → ms/ms_exp_<bizid>_<date>.json
-  → run_simulation() → {op1, op2}
-  → write_op()       → op/op_<usecase>_<bizid>_<date>.json
-  → recommendation agent
-  → return {op1, op2, recommendation}
+Frontend → POST /api/simulate { business_id, sim }
+  → server.py: load twin from disk, recompute IP1
+  → orchestrator.run_simulate_pipeline()
+      → ui_sim_to_ip2()             build IP2 from sim params
+      → build_market_snapshot()     fetch live data (FRED/BLS/BEA/Census/News)
+                                    → ms/ms_base_<bizid>_<date>.json
+      → enrichment_agent (Ollama)   extract NL params (if description provided)
+      → sim_layer.run_simulation()  rules-based financial engine → {op1, op2}
+      → simulation_agent (Ollama)   generate plain-English recommendation
+  → return {ok, result: {op1, op2, recommendation, use_case}}
 ```
 
 ---
@@ -160,8 +162,9 @@ The dashboard shows:
 | `GET` | `/api/enrollments` | List all enrolled businesses |
 | `POST` | `/api/save-twin-layer` | Register a new business |
 | `POST` | `/api/update-twin-layer` | Update business financials (versioned) |
+| `POST` | `/api/simulate` | Run a what-if simulation, returns OP1 + OP2 + recommendation |
 
-> Simulations are run through the UI only — there is no scripted `/api/simulate` endpoint.
+> See `API_SCHEMA.md` for full request/response shapes.
 
 ---
 

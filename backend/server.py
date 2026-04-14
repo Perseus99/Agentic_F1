@@ -262,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[POST] Normalized path: {path}")
         print(f"[POST] Path == '/api/simulate': {path == '/api/simulate'}")
         print(f"[POST] Path == '/api/save-twin-layer': {path == '/api/save-twin-layer'}")
-        if path not in ("/api/save-twin-layer", "/api/update-twin-layer"):
+        if path not in ("/api/save-twin-layer", "/api/update-twin-layer", "/api/simulate"):
             print(f"[POST] Path not recognized, returning 404")
             self._headers(404)
             self.wfile.write(json.dumps({"error": "not found"}).encode("utf-8"))
@@ -275,6 +275,39 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as e:
             self._headers(400)
             self.wfile.write(json.dumps({"error": "invalid json", "detail": str(e)}).encode("utf-8"))
+            return
+
+        if path == "/api/simulate":
+            business_id    = str(payload.get("business_id") or "").strip()
+            sim_params     = payload.get("sim") or {}
+            nl_description = str(sim_params.get("nlDescription") or "").strip()
+
+            if not business_id:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "business_id is required"}).encode("utf-8"))
+                return
+
+            twin = load_twin_layer_for_business(business_id)
+            if twin is None:
+                self._headers(404)
+                self.wfile.write(json.dumps({
+                    "error": f"No enrolled business found for business_id '{business_id}'",
+                    "available_business_ids": enrolled_business_ids(),
+                }).encode("utf-8"))
+                return
+
+            ip1 = twin_layer_to_ip1(twin)
+
+            try:
+                from agents.orchestrator import run_simulate_pipeline
+                result = run_simulate_pipeline(twin, ip1, sim_params, nl_description)
+                self._headers(200)
+                self.wfile.write(json.dumps({"ok": True, "result": result}).encode("utf-8"))
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self._headers(500)
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
             return
 
         if path == "/api/save-twin-layer":
