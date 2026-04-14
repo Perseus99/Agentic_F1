@@ -60,8 +60,9 @@ class SimState:
     op2:      dict[str, Any] = field(default_factory=dict)  # experiment (change applied)
 
     # ── Final outputs ─────────────────────────────────────────────────────────
-    recommendation: str | None = None
-    use_case:       str        = ""
+    recommendation:     str | None       = None
+    use_case:           str              = ""
+    proposed_scenarios: list[dict] | None = None   # set by Scenario Agent pre-pipeline
 
     # ── Agent audit log ───────────────────────────────────────────────────────
     agent_log: list[AgentContribution] = field(default_factory=list)

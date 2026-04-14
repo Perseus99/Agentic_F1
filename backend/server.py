@@ -262,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[POST] Normalized path: {path}")
         print(f"[POST] Path == '/api/simulate': {path == '/api/simulate'}")
         print(f"[POST] Path == '/api/save-twin-layer': {path == '/api/save-twin-layer'}")
-        if path not in ("/api/save-twin-layer", "/api/update-twin-layer", "/api/simulate"):
+        if path not in ("/api/save-twin-layer", "/api/update-twin-layer", "/api/simulate", "/api/suggest-scenarios"):
             print(f"[POST] Path not recognized, returning 404")
             self._headers(404)
             self.wfile.write(json.dumps({"error": "not found"}).encode("utf-8"))
@@ -303,6 +303,42 @@ class Handler(BaseHTTPRequestHandler):
                 result = run_simulate_pipeline(twin, ip1, sim_params, nl_description)
                 self._headers(200)
                 self.wfile.write(json.dumps({"ok": True, "result": result}).encode("utf-8"))
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self._headers(500)
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        if path == "/api/suggest-scenarios":
+            business_id = str(payload.get("business_id") or "").strip()
+
+            if not business_id:
+                self._headers(400)
+                self.wfile.write(json.dumps({"error": "business_id is required"}).encode("utf-8"))
+                return
+
+            twin = load_twin_layer_for_business(business_id)
+            if twin is None:
+                self._headers(404)
+                self.wfile.write(json.dumps({
+                    "error": f"No enrolled business found for business_id '{business_id}'",
+                    "available_business_ids": enrolled_business_ids(),
+                }).encode("utf-8"))
+                return
+
+            try:
+                from ml.main import build_market_snapshot
+                from sim.sim_bridge import twin_layer_to_ip1
+                from agents.scenario_agent import suggest_scenarios
+
+                ip1          = twin_layer_to_ip1(twin)
+                ms           = build_market_snapshot(twin)
+                business_name = str((twin.get("meta") or {}).get("business_name") or "Business")
+                scenarios    = suggest_scenarios(ip1, ms, business_name)
+
+                self._headers(200)
+                self.wfile.write(json.dumps({"ok": True, "scenarios": scenarios}).encode("utf-8"))
             except Exception as e:
                 import traceback
                 traceback.print_exc()
