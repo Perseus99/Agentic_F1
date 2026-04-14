@@ -55,7 +55,6 @@ backend/
 **Request flow for a simulation:**
 ```
 Frontend → Run simulation engine (UI)
-  → POST /api/simulate
   → load twin layer from disk
   → NL enrichment agent (if description provided)
   → ml_run()         → ms/ms_exp_<bizid>_<date>.json
