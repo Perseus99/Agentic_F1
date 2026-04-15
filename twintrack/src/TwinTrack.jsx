@@ -552,7 +552,9 @@ export default function TwinTrack() {
   }, [screen, simStep, sim.businessId]);
 
   useEffect(() => {
-    if (screen !== "simulate" || simStep !== 1) return;
+    const onSimStep1 = screen === "simulate" && simStep === 1;
+    const onUpdate   = screen === "update";
+    if (!onSimStep1 && !onUpdate) return;
     let active = true;
 
     const loadEnrollments = async () => {
@@ -572,7 +574,8 @@ export default function TwinTrack() {
         if (!active) return;
         setEnrollments(items);
 
-        if (!String(sim.businessId || "").trim() && items.length > 0) {
+        // Auto-select first business only on the simulate screen
+        if (onSimStep1 && !String(sim.businessId || "").trim() && items.length > 0) {
           const firstId = String(items[0].business_id || "").trim();
           if (firstId) {
             setSim((s) => ({ ...s, businessId: firstId }));
@@ -1060,7 +1063,31 @@ export default function TwinTrack() {
           {screen === "update" && (
             <div style={css.card}>
               <Field label="Business ID" error={errors.businessId}>
-                <input style={{ ...css.input, ...(errors.businessId ? { borderColor: "#f87171" } : {}) }} value={update.businessId} onChange={(e) => setUpdate({ ...update, businessId: e.target.value })} onBlur={() => !update.businessId.trim() && setErrors((p) => ({ ...p, businessId: "Required" }))} onFocus={() => setErrors((p) => ({ ...p, businessId: "" }))} placeholder="UUID or slug from enrollment" />
+                {enrollmentsUnavailable ? (
+                  <input style={{ ...css.input, ...(errors.businessId ? { borderColor: "#f87171" } : {}) }} value={update.businessId} onChange={(e) => setUpdate({ ...update, businessId: e.target.value })} onBlur={() => !update.businessId.trim() && setErrors((p) => ({ ...p, businessId: "Required" }))} onFocus={() => setErrors((p) => ({ ...p, businessId: "" }))} placeholder="UUID or slug from enrollment" />
+                ) : (
+                  <select
+                    style={{ ...css.select, ...(errors.businessId ? { borderColor: "#f87171" } : {}) }}
+                    value={update.businessId}
+                    onChange={(e) => { setUpdate({ ...update, businessId: e.target.value }); setErrors((p) => ({ ...p, businessId: "" })); }}
+                    onBlur={() => !update.businessId.trim() && setErrors((p) => ({ ...p, businessId: "Required" }))}
+                    disabled={enrollmentsLoading}
+                  >
+                    <option value="" style={{ background: "#080f20" }}>
+                      {enrollmentsLoading ? "Loading enrollments…" : "Select a business…"}
+                    </option>
+                    {enrollments.map((item) => {
+                      const id   = String(item.business_id   || "");
+                      const name = String(item.business_name || "Unnamed business");
+                      const d    = String(item.date          || "");
+                      return (
+                        <option key={`${id}-${item.file || d}`} value={id} style={{ background: "#080f20" }}>
+                          {name} ({id}){d ? ` · ${d}` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
               </Field>
               <Field label="Effective date">
                 <input type="date" style={css.input} value={update.effectiveDate} onChange={(e) => setUpdate({ ...update, effectiveDate: e.target.value })} />
@@ -1156,9 +1183,6 @@ export default function TwinTrack() {
                   <Field label="Business ID" error={errors.businessId}>
                     <input style={{ ...css.input, ...(errors.businessId ? { borderColor: "#f87171" } : {}) }} value={sim.businessId} onChange={(e) => setSim({ ...sim, businessId: e.target.value })} onBlur={() => !sim.businessId.trim() && setErrors((p) => ({ ...p, businessId: "Required" }))} onFocus={() => setErrors((p) => ({ ...p, businessId: "" }))} placeholder="Autofilled after enrollment; loads twin from disk" />
                   </Field>
-                  <p style={{ fontSize: 11.5, color: "#4a6888", margin: "-8px 0 14px", lineHeight: 1.5 }}>
-                    Simulation always reads from an existing <code style={{ color: "#0d9488" }}>backend/output/input_newbusiness_*.json</code> enrollment and writes a fresh <code style={{ color: "#0d9488" }}>input_&lt;use_case&gt;_&lt;date&gt;.json</code> output.
-                  </p>
                   {enrollmentsError && (
                     <p style={{ fontSize: 11.5, color: "#4a6888", margin: "-8px 0 12px", lineHeight: 1.5 }}>{enrollmentsError}</p>
                   )}
