@@ -143,54 +143,113 @@ function ConfidenceRing({ score }) {
   );
 }
 
-/* ── Bar Chart ── */
-function BarChart({ proj_op1, proj_op2 }) {
-  const W=620, H=160, padL=52, padR=16, padT=14, padB=30;
+/* ── Line Chart ── */
+function LineChart({ proj_op1, proj_op2, currentRevenue = 0 }) {
+  const W=620, H=180, padL=56, padR=20, padT=16, padB=32;
   const iW = W - padL - padR, iH = H - padT - padB;
 
-  // Build lookup maps keyed by month so mismatched lengths can't cause index drift
-  const op1Map = Object.fromEntries(proj_op1.map(p => [p.month, p]));
-  const op2Map = Object.fromEntries(proj_op2.map(p => [p.month, p]));
+  // Prepend month 0 (current state) as shared anchor — both lines start here
+  const anchor = { month: 0, value: currentRevenue, date: "Now" };
+  const op1 = [anchor, ...proj_op1];
+  const op2 = [anchor, ...proj_op2];
+
   const allMonths = [...new Set([
-    ...proj_op1.map(p => p.month),
-    ...proj_op2.map(p => p.month),
+    ...op1.map(p => p.month),
+    ...op2.map(p => p.month),
   ])].sort((a, b) => a - b);
 
-  const allVals = [...proj_op1.map(p=>p.value), ...proj_op2.map(p=>p.value)];
+  const allVals = [...op1.map(p => p.value), ...op2.map(p => p.value)];
   if (allVals.length === 0) return null;
-  const dataMin = 0;                           // zero-based so short bars stay visible
-  const dataMax = Math.max(...allVals) * 1.05; // 5% headroom above tallest bar
+
+  const dataMin = Math.min(...allVals) * 0.98;  // 2% breathing room below
+  const dataMax = Math.max(...allVals) * 1.02;  // 2% breathing room above
   const range   = dataMax - dataMin || 1;
   const n       = allMonths.length;
-  const groupW  = iW / n;
-  const bw      = Math.min(14, groupW * 0.35);
 
-  const toY = (v) => padT + iH - ((v - dataMin) / range) * iH;
-  const bH  = (v) => ((v - dataMin) / range) * iH;
+  const toX = (i) => padL + (n === 1 ? iW / 2 : (i / (n - 1)) * iW);
+  const toY = (v)  => padT + iH - ((v - dataMin) / range) * iH;
+
+  const points = (series) =>
+    series.map((p) => {
+      const idx = allMonths.indexOf(p.month);
+      return [toX(idx), toY(p.value)];
+    });
+
+  const toPolyline = (pts) => pts.map(([x, y]) => `${x},${y}`).join(" ");
+
+  const toAreaPath = (pts, baseline) => {
+    if (pts.length === 0) return "";
+    const top  = `M${pts[0][0]},${pts[0][1]} ` + pts.slice(1).map(([x,y]) => `L${x},${y}`).join(" ");
+    const bot  = `L${pts[pts.length-1][0]},${baseline} L${pts[0][0]},${baseline} Z`;
+    return top + " " + bot;
+  };
+
+  const pts1 = points(op1);
+  const pts2 = points(op2);
+  const baseline = toY(dataMin);
 
   const ticks = 4;
   const tickVals = Array.from({ length: ticks + 1 }, (_, i) => dataMin + (range * i) / ticks);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display:"block" }}>
+      <defs>
+        <linearGradient id="op1fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor="rgba(100,130,170,0.18)" />
+          <stop offset="100%" stopColor="rgba(100,130,170,0)"    />
+        </linearGradient>
+        <linearGradient id="op2fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor="rgba(13,148,136,0.22)" />
+          <stop offset="100%" stopColor="rgba(13,148,136,0)"    />
+        </linearGradient>
+      </defs>
+
+      {/* Grid lines + Y-axis labels */}
       {tickVals.map((v) => (
         <g key={v}>
-          <line x1={padL} y1={toY(v)} x2={W-padR} y2={toY(v)} stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
-          <text x={padL-6} y={toY(v)+4} textAnchor="end" fill={C.textDim} fontSize={8.5}>{fmt$(v)}</text>
+          <line x1={padL} y1={toY(v)} x2={W-padR} y2={toY(v)}
+            stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
+          <text x={padL-8} y={toY(v)+4} textAnchor="end"
+            fill={C.textDim} fontSize={8.5}>{fmt$(v)}</text>
         </g>
       ))}
+
+      {/* Area fills */}
+      {pts1.length > 1 && <path d={toAreaPath(pts1, baseline)} fill="url(#op1fill)" />}
+      {pts2.length > 1 && <path d={toAreaPath(pts2, baseline)} fill="url(#op2fill)" />}
+
+      {/* Lines */}
+      {pts1.length > 1 && (
+        <polyline points={toPolyline(pts1)}
+          fill="none" stroke="rgba(100,130,170,0.6)" strokeWidth={2} strokeLinejoin="round" />
+      )}
+      {pts2.length > 1 && (
+        <polyline points={toPolyline(pts2)}
+          fill="none" stroke="rgba(13,148,136,0.9)" strokeWidth={2} strokeLinejoin="round" />
+      )}
+
+      {/* Dots + X-axis labels */}
       {allMonths.map((month, i) => {
-        const p1  = op1Map[month];
-        const p2  = op2Map[month];
-        const gx  = padL + i * groupW;
-        const cx  = gx + groupW/2 - bw - 2;
-        const ex  = gx + groupW/2 + 2;
-        const lbl = (p1 || p2)?.date || `Mo ${month}`;
+        const p1 = op1.find(p => p.month === month);
+        const p2 = op2.find(p => p.month === month);
+        const lbl    = month === 0 ? "Now" : ((p1 || p2)?.date || `Mo ${month}`);
+        const isNow  = month === 0;
         return (
           <g key={month}>
-            {p1 && <rect x={cx} y={toY(p1.value)} width={bw} height={bH(p1.value)} fill="rgba(100,130,170,0.45)" rx={3} />}
-            {p2 && <rect x={ex} y={toY(p2.value)} width={bw} height={bH(p2.value)} fill="rgba(13,148,136,0.75)" rx={3} />}
-            <text x={gx+groupW/2} y={H-8} textAnchor="middle" fill={C.textDim} fontSize={8.5}>{lbl}</text>
+            {isNow
+              /* Shared anchor dot — single filled circle, no duplication */
+              ? <circle cx={toX(i)} cy={toY(p1.value)} r={4.5}
+                  fill="rgba(255,255,255,0.55)" stroke="none" />
+              : <>
+                  {p1 && <circle cx={toX(i)} cy={toY(p1.value)} r={3.5}
+                    fill={C.bg} stroke="rgba(100,130,170,0.7)" strokeWidth={2} />}
+                  {p2 && <circle cx={toX(i)} cy={toY(p2.value)} r={3.5}
+                    fill={C.bg} stroke="rgba(13,148,136,1)" strokeWidth={2} />}
+                </>
+            }
+            <text x={toX(i)} y={H-8} textAnchor="middle"
+              fill={isNow ? C.text : C.textDim} fontSize={isNow ? 9 : 8.5}
+              fontWeight={isNow ? 700 : 400}>{lbl}</text>
           </g>
         );
       })}
@@ -206,10 +265,11 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
   useEffect(() => { const t = setTimeout(() => setVisible(true), 60); return () => clearTimeout(t); }, []);
 
   /* Pull data from OP files */
-  const f1   = op1?.financials  || {};
-  const f2   = op2?.financials  || {};
-  const d    = op2?.delta       || {};
-  const risk = op2?.risk        || {};
+  const f1   = op1?.financials   || {};
+  const f2   = op2?.financials   || {};
+  const d    = op2?.delta        || {};
+  const risk = op2?.risk         || {};
+  const expl = op2?.explanations || {};
   const proj1 = op1?.projections?.revenue_6m || [];
   const proj2 = op2?.projections?.revenue_6m || [];
   const flags = risk.flags || [];
@@ -286,10 +346,10 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
           <p style={s.label}>Key Metrics — Control vs. Experiment</p>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
             {[
-              { label:"Monthly Revenue",     ctrl:fmt$(f1.revenue),           expt:fmt$(f2.revenue),           delta:fmtDelta(d.revenue_delta),              highlight:true },
-              { label:"Gross Margin",        ctrl:fmtPct(f1.margin||0),       expt:fmtPct(f2.margin||0),       delta:fmtDelta((d.margin_delta||0)*100,"pp"),  highlight:true },
-              { label:"Foot Traffic",        ctrl:fmtN(f1.footfall||0),       expt:fmtN(f2.footfall||0),       delta:fmtDelta((f2.footfall||0)-(f1.footfall||0),"#").props.children, highlight:false },
-              { label:"Avg Transaction",     ctrl:fmt$(f1.avg_ticket||0),     expt:fmt$(f2.avg_ticket||0),     delta:fmtDelta((f2.avg_ticket||0)-(f1.avg_ticket||0)), highlight:false },
+              { label:"Monthly Revenue", ctrl:fmt$(f1.revenue),       expt:fmt$(f2.revenue),       delta:fmtDelta(d.revenue_delta),             highlight:true,  explain:expl.revenue  },
+              { label:"Gross Margin",    ctrl:fmtPct(f1.margin||0),   expt:fmtPct(f2.margin||0),   delta:fmtDelta((d.margin_delta||0)*100,"pp"), highlight:true,  explain:expl.margin   },
+              { label:"Foot Traffic",    ctrl:fmtN(f1.footfall||0),   expt:fmtN(f2.footfall||0),   delta:fmtDelta((f2.footfall||0)-(f1.footfall||0),"#").props.children, highlight:false, explain:expl.footfall },
+              { label:"Avg Transaction", ctrl:fmt$(f1.avg_ticket||0), expt:fmt$(f2.avg_ticket||0), delta:fmtDelta((f2.avg_ticket||0)-(f1.avg_ticket||0)), highlight:false, explain:expl.avg_ticket },
             ].map((k) => (
               <div key={k.label} style={{ background: k.highlight ? "rgba(13,148,136,0.08)" : C.surface, border: k.highlight ? "1px solid rgba(13,148,136,0.28)" : `1px solid ${C.border}`, borderRadius:14, padding:"18px 20px" }}>
                 <p style={{ margin:"0 0 12px", fontSize:11.5, fontWeight:600, color:C.textDim, letterSpacing:"0.03em", textTransform:"uppercase" }}>{k.label}</p>
@@ -299,6 +359,9 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
                   <span style={{ fontSize:20, fontWeight:800, color:"#d0e4ff", letterSpacing:"-0.02em" }}>{k.expt}</span>
                 </div>
                 {k.delta}
+                {k.explain && (
+                  <p style={{ margin:"8px 0 0", fontSize:10.5, color:C.textDim, fontStyle:"italic", lineHeight:1.6 }}>{k.explain}</p>
+                )}
               </div>
             ))}
           </div>
@@ -330,16 +393,22 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
               <p style={{ ...s.label, margin:0 }}>{Math.max(proj1.length, proj2.length)}-Month Revenue Projection</p>
               <div style={{ display:"flex", alignItems:"center", gap:16 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:10, height:10, borderRadius:2, background:"rgba(100,130,170,0.45)", flexShrink:0 }} />
+                  <svg width={24} height={10} style={{ flexShrink:0 }}>
+                    <line x1={0} y1={5} x2={24} y2={5} stroke="rgba(100,130,170,0.6)" strokeWidth={2} />
+                    <circle cx={12} cy={5} r={3} fill="#060c1a" stroke="rgba(100,130,170,0.7)" strokeWidth={2} />
+                  </svg>
                   <span style={{ fontSize:11, color:"#5070a0", fontWeight:600 }}>Control (OP1)</span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:10, height:10, borderRadius:2, background:"rgba(13,148,136,0.75)", flexShrink:0 }} />
+                  <svg width={24} height={10} style={{ flexShrink:0 }}>
+                    <line x1={0} y1={5} x2={24} y2={5} stroke="rgba(13,148,136,0.9)" strokeWidth={2} />
+                    <circle cx={12} cy={5} r={3} fill="#060c1a" stroke="rgba(13,148,136,1)" strokeWidth={2} />
+                  </svg>
                   <span style={{ fontSize:11, color:C.accentSoft, fontWeight:600 }}>Experiment (OP2)</span>
                 </div>
               </div>
             </div>
-            <BarChart proj_op1={proj1} proj_op2={proj2} />
+            <LineChart proj_op1={proj1} proj_op2={proj2} currentRevenue={f1.revenue || 0} />
           </div>
         )}
 
@@ -370,16 +439,19 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
               <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", color:C.accentSoft }}>OP2 — Experiment Output</p>
               <p style={{ margin:"0 0 16px", fontSize:12, color:C.textMid }}>Post-decision projection · {expMeta?.label}</p>
               {[
-                ["Monthly Revenue",    fmt$(f2.revenue||0),    (f2.revenue||0)  >= (f1.revenue||0)],
-                ["Gross Margin",       fmtPct(f2.margin||0),   (f2.margin||0)   >= (f1.margin||0)],
-                ["Monthly Profit",     fmt$(f2.profit||0),     (f2.profit||0)   >= (f1.profit||0)],
-                ["Foot Traffic",       fmtN(f2.footfall||0) + " visits", (f2.footfall||0) >= (f1.footfall||0)],
-                ["Avg Ticket",         fmt$(f2.avg_ticket||0), (f2.avg_ticket||0) >= (f1.avg_ticket||0)],
-                ["COGS",               fmt$(f2.cogs||0),       (f2.cogs||0) <= (f1.cogs||0)],
-              ].map(([k, v, isGood]) => (
-                <div key={k} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:"1px solid rgba(13,148,136,0.1)" }}>
-                  <span style={{ fontSize:12.5, color:C.textMid }}>{k}</span>
-                  <span style={{ fontSize:13, fontWeight:700, color: isGood ? C.green : C.red }}>{v}</span>
+                ["Monthly Revenue",  fmt$(f2.revenue||0),              (f2.revenue||0)   >= (f1.revenue||0),  expl.revenue   ],
+                ["Gross Margin",     fmtPct(f2.margin||0),             (f2.margin||0)    >= (f1.margin||0),   expl.margin    ],
+                ["Monthly Profit",   fmt$(f2.profit||0),               (f2.profit||0)    >= (f1.profit||0),   null           ],
+                ["Foot Traffic",     fmtN(f2.footfall||0) + " visits", (f2.footfall||0)  >= (f1.footfall||0), expl.footfall  ],
+                ["Avg Ticket",       fmt$(f2.avg_ticket||0),           (f2.avg_ticket||0)>= (f1.avg_ticket||0),expl.avg_ticket],
+                ["COGS",             fmt$(f2.cogs||0),                 (f2.cogs||0)      <= (f1.cogs||0),     expl.cogs      ],
+              ].map(([k, v, isGood, hint]) => (
+                <div key={k} style={{ padding:"9px 0", borderBottom:"1px solid rgba(13,148,136,0.1)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontSize:12.5, color:C.textMid }}>{k}</span>
+                    <span style={{ fontSize:13, fontWeight:700, color: isGood ? C.green : C.red }}>{v}</span>
+                  </div>
+                  {hint && <p style={{ margin:"3px 0 0", fontSize:10.5, color:C.textDim, fontStyle:"italic", lineHeight:1.5 }}>{hint}</p>}
                 </div>
               ))}
               {f2.break_even_months && (

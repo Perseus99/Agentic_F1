@@ -513,6 +513,123 @@ def _franchising(ip1: dict, ip2: dict, ms: dict) -> tuple[dict, dict, float, flo
     return fin_op1, fin_op2, footfall_op1, new_footfall
 
 
+# ── Explanations Builder ──────────────────────────────────────────────────────
+
+def _build_explanations(ip1: dict, ip2: dict, ms: dict,
+                        fin_op1: dict, fin_op2: dict,
+                        use_case: str) -> dict:
+    """
+    Generate rules-based plain-English explanations for each metric delta.
+
+    Explanations use the same formula parameters as the use-case functions so
+    the text is always consistent with the actual simulation outputs — no LLM
+    needed.  Each key corresponds to a metric shown in the Dashboard KPI grid.
+    """
+    el        = ms.get("elasticity_modifiers", {})
+    sentiment = ms.get("news_context", {}).get("sentiment_score", 0.0)
+
+    if use_case == "pricing":
+        delta_p     = float(ip2.get("price_change_pct", 0.0))
+        price_el    = float(el.get("price_elasticity", -0.8))
+        volume_chg  = price_el * delta_p          # signed; negative = demand falls
+        direction_p = "increase" if delta_p > 0 else "decrease"
+        vol_dir     = "shrinks" if volume_chg < 0 else "grows"
+        sent_label  = ("slightly boosted" if sentiment > 0.1
+                       else "slightly dampened" if sentiment < -0.1
+                       else "unaffected")
+        rev_dir     = "higher" if fin_op2["revenue"] > fin_op1["revenue"] else "lower"
+        margin_dir  = "widens" if fin_op2["margin"]  > fin_op1["margin"]  else "narrows"
+
+        return {
+            "footfall":    (
+                f"A {abs(delta_p)*100:.1f}% price {direction_p} with elasticity "
+                f"{price_el:.2f} {vol_dir} visit volume by {abs(volume_chg)*100:.1f}%."
+            ),
+            "avg_ticket":  (
+                f"Ticket rises {abs(delta_p)*100:.1f}% — price change passes directly "
+                f"to per-visit spend."
+            ),
+            "revenue":     (
+                f"Net revenue is {rev_dir}: volume {vol_dir} {abs(volume_chg)*100:.1f}% "
+                f"while ticket rises {abs(delta_p)*100:.1f}%. "
+                f"News sentiment leaves the total {sent_label}."
+            ),
+            "cogs":        (
+                f"Variable costs scale with visit volume ({vol_dir} "
+                f"{abs(volume_chg)*100:.1f}%); fixed costs are unchanged."
+            ),
+            "margin":      (
+                f"Fixed costs spread over a {'higher' if delta_p > 0 else 'lower'} "
+                f"revenue base {margin_dir} the gross margin."
+            ),
+        }
+
+    elif use_case == "target_audience":
+        reach_inc   = float(ip2.get("expected_reach_increase", 0.15))
+        mkt_pct     = float(ip2.get("marketing_spend_increase", 0.10))
+        target_demo = ip2.get("target_demographic", "18_34")
+        demo_labels = {"18_34": "18–34", "35_54": "35–54", "55_plus": "55+"}
+        demo_lbl    = demo_labels.get(target_demo, target_demo)
+        ticket_dir  = "higher" if fin_op2["avg_ticket"] > fin_op1["avg_ticket"] else "lower"
+        margin_dir  = "compressed" if fin_op2["margin"] < fin_op1["margin"] else "sustained"
+
+        return {
+            "footfall":    (
+                f"Targeting the {demo_lbl} segment with a {reach_inc*100:.0f}% reach "
+                f"increase drives proportional foot traffic growth."
+            ),
+            "avg_ticket":  (
+                f"The {demo_lbl} demographic income multiplier shifts per-visit spend "
+                f"to {ticket_dir} levels."
+            ),
+            "revenue":     (
+                f"Revenue scales with both the footfall increase ({reach_inc*100:.0f}%) "
+                f"and the demographic ticket multiplier combined."
+            ),
+            "cogs":        (
+                f"Variable costs scale with the new footfall volume; "
+                f"marketing spend of {mkt_pct*100:.0f}% of new revenue is added to COGS."
+            ),
+            "margin":      (
+                f"Marketing cost addition leaves the margin {margin_dir} — "
+                f"higher volume can offset the spend if the demographic lifts are realised."
+            ),
+        }
+
+    elif use_case == "franchising":
+        n_loc       = int(ip2.get("new_locations", 1))
+        invest      = float(ip2.get("investment_per_location", 50_000))
+        royalty_pct = float(ip2.get("royalty_pct", 0.0))
+        saturation  = float(ms.get("market_data", {}).get("market_saturation_index", 0.30))
+        sat_disc    = saturation * 0.30
+        model_type  = (f"franchisee-operated (royalty {royalty_pct*100:.0f}%)"
+                       if royalty_pct > 0 else "company-owned")
+
+        return {
+            "footfall":    (
+                f"{n_loc} new location{'s' if n_loc > 1 else ''} add visits at 70% "
+                f"efficiency — shared trade-zone overlap prevents 1:1 scaling."
+            ),
+            "avg_ticket":  (
+                "Average ticket is unchanged — new locations run the same product mix."
+            ),
+            "revenue":     (
+                f"Revenue model: {model_type}. Market saturation ({saturation:.0%}) "
+                f"applies a {sat_disc:.0%} discount to expected location revenue."
+            ),
+            "cogs":        (
+                f"New location costs (60% fixed + 80% variable of original) plus "
+                f"${invest/1000:.0f}k/location amortised over 36 months added to COGS."
+            ),
+            "margin":      (
+                "Expansion costs compress the margin initially; profitability recovers "
+                "as the amortised investment is paid down."
+            ),
+        }
+
+    return {}
+
+
 # ── Dispatch Table ────────────────────────────────────────────────────────────
 
 _FORMULA: dict[str, Any] = {
@@ -545,6 +662,7 @@ def run_simulation(ms: dict, ip1: dict, ip2: dict) -> dict:
     formula_fn                               = _FORMULA[use_case]
     fin_op1, fin_op2, foot_op1, foot_op2    = formula_fn(ip1, ip2, ms)
 
+    explanations = _build_explanations(ip1, ip2, ms, fin_op1, fin_op2, use_case)
     confidence   = compute_confidence_score(ms, use_case, ip1=ip1, ip2=ip2)
     sentiment    = ms.get("news_context", {}).get("sentiment_score", 0.0)
     flags        = ms.get("news_context", {}).get("flags", [])
@@ -577,10 +695,11 @@ def run_simulation(ms: dict, ip1: dict, ip2: dict) -> dict:
             "delta":       {},
         },
         "op2": {
-            "financials":  fin_op2,
-            "projections": proj_op2,
-            "risk":        risk_block,
-            "delta":       delta,
+            "financials":   fin_op2,
+            "projections":  proj_op2,
+            "risk":         risk_block,
+            "delta":        delta,
+            "explanations": explanations,
         },
     }
 
