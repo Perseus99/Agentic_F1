@@ -43,7 +43,11 @@ const fmtN  = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits
 const fmtPct= (v) => (v * 100).toFixed(1) + "%";
 const fmtDelta = (v, prefix="$") => {
   const pos = v >= 0;
-  return <span style={pos ? s.deltaUp : s.deltaDown}>{pos ? "+" : ""}{prefix === "$" ? fmt$(Math.abs(v)) : v.toFixed(2)}{pos ? " ↑" : " ↓"}</span>;
+  let valStr;
+  if (prefix === "$")       valStr = fmt$(Math.abs(v));
+  else if (prefix === "pp") valStr = Math.abs(v).toFixed(1) + "pp";
+  else                      valStr = fmtN(Math.abs(v));   // visits / raw integer
+  return <span style={pos ? s.deltaUp : s.deltaDown}>{pos ? "+" : "−"}{valStr}{pos ? " ↑" : " ↓"}</span>;
 };
 
 /* ── Summary builder for clipboard / PDF ── */
@@ -66,10 +70,12 @@ function buildSummary({ biz, expMeta, f1, f2, d, confidence, flags, recommendati
   const netDeltaPct = f1.profit ? ((netDelta / f1.profit) * 100).toFixed(1) : "0";
   const netSign     = netDelta >= 0 ? "+" : "";
 
+  const marginPp   = ((d.margin_delta||0)*100).toFixed(1);
+  const marginDir  = (d.margin_delta||0) >= 0 ? "expanding" : "declining";
   const recoText = recommendation
     || (d.revenue_delta >= 0
-      ? `The simulation projects a revenue improvement of ${fmt$(d.revenue_delta)}/mo (+${((d.revenue_delta/(f1.revenue||1))*100).toFixed(1)}%) with margin expanding by ${((d.margin_delta||0)*100).toFixed(1)}pp. Confidence: ${Math.round(confidence*100)}%.`
-      : `The simulation projects a revenue decline of ${fmt$(Math.abs(d.revenue_delta||0))}/mo. Review cost structure before proceeding. Confidence: ${Math.round(confidence*100)}%.`);
+      ? `The simulation projects a revenue improvement of ${fmt$(d.revenue_delta)}/mo (+${((d.revenue_delta/(f1.revenue||1))*100).toFixed(1)}%) with margin ${marginDir} by ${Math.abs(Number(marginPp)).toFixed(1)}pp. Confidence: ${Math.round(confidence*100)}%.`
+      : `The simulation projects a revenue decline of ${fmt$(Math.abs(d.revenue_delta||0))}/mo with margin ${marginDir} by ${Math.abs(Number(marginPp)).toFixed(1)}pp. Review cost structure before proceeding. Confidence: ${Math.round(confidence*100)}%.`);
 
   const flagLines = (flags||[]).length
     ? (flags.map(f => `  [${(f.impact||"neutral").toUpperCase()}] ${f.headline} — ${f.relevance}`).join("\n"))
@@ -279,6 +285,8 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
   /* Net income delta */
   const netDelta = d.profit_delta || 0;
   const netDeltaPct = f1.profit ? ((netDelta / f1.profit) * 100).toFixed(1) : "0";
+  const marginPp  = ((d.margin_delta||0)*100).toFixed(1);
+  const marginDir = (d.margin_delta||0) >= 0 ? "expanding" : "declining";
 
   const fade = { opacity: visible ? 1 : 0, transform: visible ? "translateY(0)" : "translateY(12px)", transition: "opacity 0.5s ease, transform 0.5s ease" };
 
@@ -327,7 +335,9 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
               <p style={{ fontSize:10.5, fontWeight:700, letterSpacing:"0.16em", textTransform:"uppercase", color:C.accentSoft, margin:"0 0 6px" }}>Simulation Results</p>
               <h1 style={{ fontSize:26, fontWeight:800, letterSpacing:"-0.04em", color:"#e0eeff", margin:"0 0 8px", lineHeight:1.15 }}>{biz?.name || "Business"}</h1>
               <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
-                <span style={s.chip("#0d9488")}>{expMeta?.label || "Simulation"}</span>
+                {expMeta?.label && expMeta.label !== expMeta?.useCase && (
+                  <span style={s.chip("#0d9488")}>{expMeta.label}</span>
+                )}
                 <span style={s.chip("#a78bfa")}>{expMeta?.useCase || "Use Case"}</span>
                 <span style={s.chip("#6080a8")}>{biz?.location || "Location"}</span>
                 <span style={s.chip("#3d5570")}>{expMeta?.date || new Date().toLocaleDateString()}</span>
@@ -348,7 +358,7 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
             {[
               { label:"Monthly Revenue", ctrl:fmt$(f1.revenue),       expt:fmt$(f2.revenue),       delta:fmtDelta(d.revenue_delta),             highlight:true,  explain:expl.revenue  },
               { label:"Gross Margin",    ctrl:fmtPct(f1.margin||0),   expt:fmtPct(f2.margin||0),   delta:fmtDelta((d.margin_delta||0)*100,"pp"), highlight:true,  explain:expl.margin   },
-              { label:"Foot Traffic",    ctrl:fmtN(f1.footfall||0),   expt:fmtN(f2.footfall||0),   delta:fmtDelta((f2.footfall||0)-(f1.footfall||0),"#").props.children, highlight:false, explain:expl.footfall },
+              { label:"Foot Traffic",    ctrl:fmtN(f1.footfall||0),   expt:fmtN(f2.footfall||0),   delta:fmtDelta((f2.footfall||0)-(f1.footfall||0),"#"), highlight:false, explain:expl.footfall },
               { label:"Avg Transaction", ctrl:fmt$(f1.avg_ticket||0), expt:fmt$(f2.avg_ticket||0), delta:fmtDelta((f2.avg_ticket||0)-(f1.avg_ticket||0)), highlight:false, explain:expl.avg_ticket },
             ].map((k) => (
               <div key={k.label} style={{ background: k.highlight ? "rgba(13,148,136,0.08)" : C.surface, border: k.highlight ? "1px solid rgba(13,148,136,0.28)" : `1px solid ${C.border}`, borderRadius:14, padding:"18px 20px" }}>
@@ -397,14 +407,14 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
                     <line x1={0} y1={5} x2={24} y2={5} stroke="rgba(100,130,170,0.6)" strokeWidth={2} />
                     <circle cx={12} cy={5} r={3} fill="#060c1a" stroke="rgba(100,130,170,0.7)" strokeWidth={2} />
                   </svg>
-                  <span style={{ fontSize:11, color:"#5070a0", fontWeight:600 }}>Control (OP1)</span>
+                  <span style={{ fontSize:11, color:"#5070a0", fontWeight:600 }}>Control</span>
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                   <svg width={24} height={10} style={{ flexShrink:0 }}>
                     <line x1={0} y1={5} x2={24} y2={5} stroke="rgba(13,148,136,0.9)" strokeWidth={2} />
                     <circle cx={12} cy={5} r={3} fill="#060c1a" stroke="rgba(13,148,136,1)" strokeWidth={2} />
                   </svg>
-                  <span style={{ fontSize:11, color:C.accentSoft, fontWeight:600 }}>Experiment (OP2)</span>
+                  <span style={{ fontSize:11, color:C.accentSoft, fontWeight:600 }}>Experiment</span>
                 </div>
               </div>
             </div>
@@ -418,7 +428,7 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
             {/* OP1 */}
             <div style={s.card}>
-              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", color:C.textDim }}>OP1 — Control Baseline</p>
+              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", color:C.textDim }}>Control Baseline</p>
               <p style={{ margin:"0 0 16px", fontSize:12, color:"#3a5468" }}>Current state · no change applied</p>
               {[
                 ["Monthly Revenue",    fmt$(f1.revenue||0)],
@@ -436,7 +446,7 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
             </div>
             {/* OP2 */}
             <div style={s.accentCard}>
-              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", color:C.accentSoft }}>OP2 — Experiment Output</p>
+              <p style={{ margin:"0 0 4px", fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase", color:C.accentSoft }}>Experiment Results</p>
               <p style={{ margin:"0 0 16px", fontSize:12, color:C.textMid }}>Post-decision projection · {expMeta?.label}</p>
               {[
                 ["Monthly Revenue",  fmt$(f2.revenue||0),              (f2.revenue||0)   >= (f1.revenue||0),  expl.revenue   ],
@@ -509,15 +519,10 @@ export default function Dashboard({ biz, expMeta, op1, op2, recommendation, onBa
                   {recommendation
                     ? recommendation
                     : d.revenue_delta >= 0
-                      ? `The simulation projects a revenue improvement of ${fmt$(d.revenue_delta)}/mo (+${((d.revenue_delta / (f1.revenue||1)) * 100).toFixed(1)}%) with margin expanding by ${((d.margin_delta||0)*100).toFixed(1)}pp. Confidence score: ${Math.round(confidence*100)}%.`
-                      : `The simulation projects a revenue decline of ${fmt$(Math.abs(d.revenue_delta))}/mo. Review cost structure before proceeding. Confidence score: ${Math.round(confidence*100)}%.`
+                      ? `The simulation projects a revenue improvement of ${fmt$(d.revenue_delta)}/mo (+${((d.revenue_delta / (f1.revenue||1)) * 100).toFixed(1)}%) with margin ${marginDir} by ${Math.abs(Number(marginPp)).toFixed(1)}pp. Confidence score: ${Math.round(confidence*100)}%.`
+                      : `The simulation projects a revenue decline of ${fmt$(Math.abs(d.revenue_delta))}/mo with margin ${marginDir} by ${Math.abs(Number(marginPp)).toFixed(1)}pp. Review cost structure before proceeding. Confidence score: ${Math.round(confidence*100)}%.`
                   }
                 </p>
-              </div>
-              <div style={{ marginTop:16, display:"flex", gap:8, flexWrap:"wrap" }}>
-                {["Grounded in simulation data", "OP1→OP2 delta justified", `Confidence: ${Math.round(confidence*100)}%`, d.profit_delta >= 0 ? "Profitable" : "Review costs"].map(tag => (
-                  <span key={tag} style={s.chip("#0d9488")}>{tag}</span>
-                ))}
               </div>
             </div>
           )}

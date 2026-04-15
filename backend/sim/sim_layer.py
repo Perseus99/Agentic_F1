@@ -471,14 +471,19 @@ def _franchising(ip1: dict, ip2: dict, ms: dict) -> tuple[dict, dict, float, flo
         rev_from_new = new_revenue_adj
     rev_op2 = rev_op1 + rev_from_new
 
-    # New location costs: fixed (rent, utilities for new location) estimated at 60% of
-    # original fixed costs, variable at 80% of original variable costs (less efficient initially).
+    # New location costs depend on ownership model:
+    #   royalty_pct > 0  → franchisee-operated: franchisee bears operating costs;
+    #                       franchisor only absorbs the investment amortisation.
+    #   royalty_pct == 0 → company-owned: franchisor carries full operating costs.
     # Plus amortized investment over 36 months (more realistic than 24).
     total_invest      = n_loc * invest_per_loc
     amort_monthly     = total_invest / 36
     new_loc_fixed     = fixed_op1 * n_loc * 0.60
     new_loc_variable  = variable_op1 * n_loc * 0.80
-    cogs_op2          = cogs_op1 + new_loc_fixed + new_loc_variable + amort_monthly
+    if royalty_pct > 0:
+        cogs_op2 = cogs_op1 + amort_monthly
+    else:
+        cogs_op2 = cogs_op1 + new_loc_fixed + new_loc_variable + amort_monthly
 
     profit_op2        = rev_op2 - cogs_op2
     margin_op2        = profit_op2 / rev_op2 if rev_op2 else 0
@@ -618,12 +623,18 @@ def _build_explanations(ip1: dict, ip2: dict, ms: dict,
                 f"applies a {sat_disc:.0%} discount to expected location revenue."
             ),
             "cogs":        (
-                f"New location costs (60% fixed + 80% variable of original) plus "
-                f"${invest/1000:.0f}k/location amortised over 36 months added to COGS."
+                (f"Franchisee bears operating costs; franchisor absorbs only the "
+                 f"${invest/1000:.0f}k/location investment amortised over 36 months.")
+                if royalty_pct > 0 else
+                (f"Company-owned: new location costs (60% fixed + 80% variable) plus "
+                 f"${invest/1000:.0f}k/location amortised over 36 months added to COGS.")
             ),
             "margin":      (
-                "Expansion costs compress the margin initially; profitability recovers "
-                "as the amortised investment is paid down."
+                ("Royalty income offsets amortisation cost; margin impact is limited "
+                 "to the investment paydown period.")
+                if royalty_pct > 0 else
+                ("Expansion costs compress the margin initially; profitability recovers "
+                 "as the amortised investment is paid down.")
             ),
         }
 

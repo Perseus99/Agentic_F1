@@ -89,8 +89,14 @@ def resolve_demographic(description: str) -> str:
 # Recommendation generation (no tools — pure LLM reasoning over numbers)
 # ---------------------------------------------------------------------------
 _REC_SYSTEM = """You are a financial advisor giving concise, specific recommendations to small business owners.
-Be direct, cite the numbers, and always state clearly: proceed / proceed with caution / avoid.
-Identify the single most important risk to monitor."""
+Be direct and cite the numbers. Begin your response with one of these three verdicts — choose based on the data:
+
+  PROCEED       — revenue and profit both improve, margin holds or improves, confidence ≥ 65%
+  PROCEED WITH CAUTION — mixed signals: revenue up but margin declines, OR low confidence (< 65%), OR sentiment negative
+  DO NOT PROCEED — profit declines, margin drops significantly (> 5pp), or break-even > 60 months
+
+Do not default to "proceed with caution" out of habit — use the thresholds above.
+After the verdict, name the single most important risk in 1-2 sentences."""
 
 
 def generate_recommendation(op1: dict, op2: dict, use_case: str, business_name: str) -> str | None:
@@ -119,9 +125,9 @@ def generate_recommendation(op1: dict, op2: dict, use_case: str, business_name: 
             f"  Foot traffic: {f1.get('footfall', 0):,.0f} → {f2.get('footfall', 0):,.0f} visits/mo\n"
             f"  Confidence:   {risk.get('confidence_score', 0)*100:.0f}%\n"
             f"  Sentiment:    {risk.get('sentiment_score', 0):.2f}\n\n"
-            "Write 2-3 sentences. Be direct, cite numbers. "
-            "State: proceed / proceed with caution / avoid. "
-            "Name the single most important risk."
+            "Write 2-3 sentences. Start with PROCEED, PROCEED WITH CAUTION, or DO NOT PROCEED "
+            "based on whether the numbers justify it — do not hedge if the data is clearly positive or clearly negative. "
+            "Cite the key numbers, then name the single most important risk."
         ),
     )
 

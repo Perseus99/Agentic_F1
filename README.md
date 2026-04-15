@@ -219,7 +219,7 @@ The dashboard shows:
 - Revenue projection line chart with shared "Now" anchor and convergence decay
 - Confidence score (model trustworthiness, not environment favorability)
 - News sentiment with relevant flags for your business type and market
-- Plain-English recommendation from the simulation agent
+- Plain-English recommendation from the simulation agent, opening with a clear verdict: **PROCEED**, **PROCEED WITH CAUTION**, or **DO NOT PROCEED**
 
 ---
 
@@ -261,7 +261,7 @@ Six local Ollama (`qwen2.5:7b`) agents, each with a specific role:
 | **Elasticity Agent** | ML layer (every run) | Takes formula-derived elasticity values, adjusts them using business type and local market reasoning |
 | **Enrichment Agent** | Before simulation (if NL description provided) | Extracts structured IP2 parameters from plain-English description; only overrides keys explicitly mentioned |
 | **Critique Agent** | After simulation (every run) | ReAct loop: flags contradictions between OP1→OP2 projections and market context; applies −0.05 to −0.30 confidence penalty |
-| **Simulation Agent** | After critique (every run) | Writes a 2–3 sentence recommendation grounded in the final OP delta numbers |
+| **Simulation Agent** | After critique (every run) | Writes a 2–3 sentence verdict grounded in the final OP delta numbers; opens with **PROCEED**, **PROCEED WITH CAUTION**, or **DO NOT PROCEED** based on profit direction, margin change (>5pp threshold), break-even length, and confidence score |
 | **Scenario Agent** | On-demand via `/api/suggest-scenarios` | Reads market snapshot + business financials and proposes 2–3 ranked simulation scenarios with pre-filled parameters |
 
 All agents degrade gracefully — if Ollama is unavailable, the pipeline continues with rule-based fallbacks.
