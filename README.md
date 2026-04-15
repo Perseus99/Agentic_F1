@@ -1,6 +1,6 @@
-# TwinTrack — Digital Twin Economic Simulator
+# Strategix — Digital Twin Economic Simulator
 
-TwinTrack lets a small business owner register their business as a **digital twin** — a structured snapshot of their financials, costs, and sales profile — and then run **what-if simulations** before making real decisions.
+Strategix lets a small business owner register their business as a **digital twin** — a structured snapshot of their financials, costs, and sales profile — and then run **what-if simulations** before making real decisions.
 
 Each simulation runs a full pipeline:
 1. Pulls live economic data (CPI, unemployment, GDP, consumer spending, local market density, news sentiment)

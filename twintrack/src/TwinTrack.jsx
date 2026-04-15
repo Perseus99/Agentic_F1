@@ -51,9 +51,9 @@ const USE_CASES = [
 ];
 
 /** sessionStorage key for the Register-business JSON (fed into POST /api/simulate). */
-const TWIN_LAYER_STORAGE_KEY = "twintrack_twin_layer_json";
+const TWIN_LAYER_STORAGE_KEY = "strategix_twin_layer_json";
 /** Last enrolled business UUID — used to autopopulate Run simulation. */
-const BUSINESS_ID_STORAGE_KEY = "twintrack_business_id";
+const BUSINESS_ID_STORAGE_KEY = "strategix_business_id";
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765").replace(/\/$/, "");
 
 function apiUrl(path) {
@@ -525,7 +525,7 @@ export default function TwinTrack() {
   const [enrollmentsError, setEnrollmentsError] = useState(null);
   const [enrollmentsUnavailable, setEnrollmentsUnavailable] = useState(false);
   const [lastSimResult, setLastSimResult] = useState(() => {
-    try { const r = sessionStorage.getItem("twintrack_last_sim"); return r ? JSON.parse(r) : null; } catch { return null; }
+    try { const r = sessionStorage.getItem("strategix_last_sim"); return r ? JSON.parse(r) : null; } catch { return null; }
   });
 
   const [enroll, setEnroll] = useState(() => createNewEnrollState());
@@ -679,7 +679,7 @@ export default function TwinTrack() {
       const simPayload = { kind: "simulation_engine_result", saved_to: data.saved_to, ...(data.result || {}) };
       setSubmittedPayload(simPayload);
       setLastSimResult(simPayload);
-      try { sessionStorage.setItem("twintrack_last_sim", JSON.stringify(simPayload)); } catch {}
+      try { sessionStorage.setItem("strategix_last_sim", JSON.stringify(simPayload)); } catch {}
       setScreen("submitted");
     } catch (e) {
       setSimApiError(e.message || String(e));
@@ -778,8 +778,8 @@ export default function TwinTrack() {
       {/* ── Sidebar ── */}
       <aside style={css.sidebar}>
         <div style={css.sidebarBrand}>
-          <p style={css.sidebarTag}>TwinTrack</p>
-          <h1 style={css.sidebarTitle}>TwinTrack</h1>
+          <p style={css.sidebarTag}>Strategix</p>
+          <h1 style={css.sidebarTitle}>Strategix</h1>
           <p style={css.sidebarDesc}>Digital twin economic simulator. Model decisions. Compare outcomes.</p>
         </div>
 
@@ -829,7 +829,7 @@ export default function TwinTrack() {
               {/* Hero */}
               <div style={{ position: "relative", padding: "20px 0 18px", marginBottom: 12, textAlign: "center" }}>
                 <h2 style={{ fontSize: 34, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: ACCENT_SOFT, margin: "0 0 10px", position: "relative" }}>
-                  TwinTrack
+                  Strategix
                 </h2>
                 <p style={{ fontSize: 13, color: "#6080a0", margin: "0 auto 22px", lineHeight: 1.7, maxWidth: 500, position: "relative" }}>
                   Run your simulation before you risk it.
