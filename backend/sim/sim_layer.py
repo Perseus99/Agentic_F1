@@ -1,7 +1,7 @@
 """
 TwinTrack — Simulation Layer
 ================================
-Input:  MS  (market snapshot: economic indicators + Prophet forecasts + sentiment)
+Input:  MS  (market snapshot: economic indicators + ARIMA forecasts + sentiment)
         IP1 (business financials: current state)
         IP2 (decision being simulated: use case + parameters)
 
@@ -11,7 +11,7 @@ Output: OP1 (base case — control, no change applied)
 Decision approach
 -----------------
 - ALL calculations are rules-based / formula-driven.  No LLM calls here.
-- Prophet forecast values are READ from MS.forecasts (computed in ML layer).
+- ARIMA forecast values are READ from MS.forecasts (computed in ML layer).
 - Sentiment is READ from MS.news_context.sentiment_score (computed by LLM in ML layer).
 - Elasticity modifiers are READ from MS.elasticity_modifiers (computed in ML layer).
 - The Sim layer's only job: apply economic formulas and produce OP1 + OP2.
@@ -33,7 +33,7 @@ OP_DIR    = os.path.join(_DATA_DIR, "op")
 
 def _prophet_uncertainty_score(forecasts: dict) -> float:
     """
-    For each Prophet forecast series, compute normalised band width:
+    For each ARIMA forecast series, compute normalised band width:
         band_width = mean(upper − lower) / |mean(values)|
     certainty = max(0, 1 − band_width)
     Average across all series.  Tighter bands → higher score.
@@ -207,36 +207,68 @@ _PROJECTION_DECAY = 0.92   # per-month decay of the OP1→OP2 gap
 def _build_projections(ms: dict, base_revenue: float, base_footfall: float,
                        decision_ratio: float = 1.0, horizon: int = 6) -> dict:
     """
-    Use Prophet sector_spending_forecast from MS to project an N-month trajectory.
-    The decision_ratio (OP2_revenue / OP1_revenue) scales OP2 projections on top,
-    with exponential decay so the OP1/OP2 gap narrows over time rather than staying
-    constant forever (markets absorb pricing and audience changes gradually).
+    Build an N-month revenue/footfall projection using a composite economic
+    growth factor derived from three forecast signals:
 
-    Rule: growth_factor   = forecast_value / current_value
-          decayed_ratio_t = 1 + (decision_ratio − 1) × DECAY^t
-          projected       = base × growth_factor × decayed_ratio_t
+        spending_growth  — sector consumer spending trajectory (primary, 50%)
+        gdp_modifier     — GDP forecast partial pass-through (30%)
+        cpi_modifier     — CPI dampening on real purchasing power (20%)
+
+    All three forecast series are monthly-upsampled in the ML layer so there
+    is always one data point per month; no more fallback after month 2.
+
+    The decision_ratio (OP2_revenue / OP1_revenue) is applied on top with
+    exponential decay so the OP1/OP2 gap converges over time.
+
+    Formula per month i:
+        growth       = spending_growth × gdp_modifier × cpi_modifier
+        decayed      = 1 + (decision_ratio − 1) × DECAY^i
+        projected    = base × growth × decayed
     """
-    ei            = ms.get("economic_indicators", {})
-    fc            = ms.get("forecasts", {})
-    sector_fc     = fc.get("sector_spending_forecast", {}).get("values", [])
+    ei = ms.get("economic_indicators", {})
+    fc = ms.get("forecasts", {})
+
+    sector_fc = fc.get("sector_spending_forecast", {}).get("values", [])
+    gdp_fc    = fc.get("gdp_forecast",             {}).get("values", [])
+    cpi_fc    = fc.get("cpi_forecast",             {}).get("values", [])
+
     current_spend = ei.get("sector_consumer_spending", {}).get("current", 1.0) or 1.0
+    current_gdp   = ei.get("gdp",   {}).get("current", 1.0) or 1.0
+    current_cpi   = ei.get("cpi",   {}).get("current", 1.0) or 1.0
 
     revenue_nm:  list[dict] = []
     footfall_nm: list[dict] = []
 
-    for i, entry in enumerate(sector_fc[:horizon]):
-        val          = entry["value"] if isinstance(entry, dict) else current_spend
-        growth       = val / current_spend
-        decayed      = 1.0 + (decision_ratio - 1.0) * (_PROJECTION_DECAY ** i)
-        revenue_nm.append({"month": i + 1, "value": round(base_revenue  * growth * decayed, 2)})
-        footfall_nm.append({"month": i + 1, "value": round(base_footfall * growth * decayed, 0)})
+    for i in range(horizon):
+        # ── Sector spending growth (50% weight — primary demand signal) ──────
+        if i < len(sector_fc):
+            spend_val       = sector_fc[i]["value"] if isinstance(sector_fc[i], dict) else current_spend
+            spending_growth = spend_val / current_spend
+        else:
+            spending_growth = 1.0
 
-    # Fallback: if MS has no forecast data, project flat with decay applied
-    if not revenue_nm:
-        for i in range(horizon):
-            decayed = 1.0 + (decision_ratio - 1.0) * (_PROJECTION_DECAY ** i)
-            revenue_nm.append({"month": i + 1, "value": round(base_revenue  * decayed, 2)})
-            footfall_nm.append({"month": i + 1, "value": round(base_footfall * decayed, 0)})
+        # ── GDP modifier (30% weight — partial macro pass-through) ───────────
+        # Rising GDP lifts consumer activity; only 30% passes through to a
+        # single sector (the rest goes to savings, other sectors, etc.)
+        if i < len(gdp_fc):
+            gdp_val      = gdp_fc[i]["value"] if isinstance(gdp_fc[i], dict) else current_gdp
+            gdp_modifier = 1.0 + (gdp_val / current_gdp - 1.0) * 0.3
+        else:
+            gdp_modifier = 1.0
+
+        # ── CPI dampening (20% weight — inflation erodes real purchasing power)
+        # Rising prices reduce real discretionary spend at 20% pass-through.
+        if i < len(cpi_fc):
+            cpi_val      = cpi_fc[i]["value"] if isinstance(cpi_fc[i], dict) else current_cpi
+            cpi_modifier = 1.0 - (cpi_val / current_cpi - 1.0) * 0.2
+        else:
+            cpi_modifier = 1.0
+
+        growth  = spending_growth * gdp_modifier * cpi_modifier
+        decayed = 1.0 + (decision_ratio - 1.0) * (_PROJECTION_DECAY ** i)
+
+        revenue_nm.append( {"month": i + 1, "value": round(base_revenue  * growth * decayed, 2)})
+        footfall_nm.append({"month": i + 1, "value": round(base_footfall * growth * decayed, 0)})
 
     market_growth = ei.get("sector_growth_rate", {}).get("current", 0.0)
     return {
@@ -499,7 +531,7 @@ def run_simulation(ms: dict, ip1: dict, ip2: dict) -> dict:
     Steps:
     1. Identify use case from IP2.
     2. Run use-case formula → OP1 financials (control) + OP2 financials (experiment).
-    3. Build 6-month projections from MS Prophet forecasts.
+    3. Build 6-month projections from MS ARIMA forecasts.
     4. Compute confidence score from MS.
     5. Compute delta (OP2 − OP1).
     6. Assemble and return OP1 + OP2 in the output schema.
